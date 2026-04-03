@@ -329,17 +329,41 @@ function parseCSV(text) {
 
 function applyRows(rows) {
   customers = [];
-  rows.forEach(row => {
-    if (!row || row.length < 2) return;
-    const name    = String(row[0]).trim();
+  if (!rows || rows.length === 0) return 0;
+
+  // Auto-detect column order from header row
+  let nameCol = 0, barcodeCol = 1, startRow = 0;
+  const first = rows[0];
+  if (first && first.length >= 2) {
+    const h0 = String(first[0]).trim().toLowerCase();
+    const h1 = String(first[1]).trim().toLowerCase();
+    const headers = ['name', 'barcode', 'id', 'code', 'member', 'customer', 'number', 'card'];
+    const isHeader = headers.some(h => h0.includes(h) || h1.includes(h));
+    if (isHeader) {
+      startRow = 1; // skip header row
+      // If first column looks like barcode/id/code/number, swap columns
+      if (['barcode','id','code','number','card'].some(h => h0.includes(h)) &&
+          !['barcode','id','code','number','card'].some(h => h1.includes(h))) {
+        nameCol = 1; barcodeCol = 0;
+      } else if (['name','member','customer'].some(h => h1.includes(h)) &&
+                 !['name','member','customer'].some(h => h0.includes(h))) {
+        nameCol = 1; barcodeCol = 0;
+      }
+    }
+  }
+
+  for (let i = startRow; i < rows.length; i++) {
+    const row = rows[i];
+    if (!row || row.length < 2) continue;
+    const name = String(row[nameCol]).trim();
     // Force barcode to string — Excel may pass it as a number (losing leading zeros, adding decimals)
-    let barcode = String(row[1]).trim();
+    let barcode = String(row[barcodeCol]).trim();
     // Remove trailing ".0" that Excel adds to whole numbers (e.g. "12345.0" → "12345")
     barcode = barcode.replace(/\.0$/, '');
-    if (!name || !barcode || name.toLowerCase() === 'name') return;
-    if (customers.find(c => c.barcode === barcode)) return;
+    if (!name || !barcode) continue;
+    if (customers.find(c => c.barcode === barcode)) continue;
     customers.push({ name, barcode });
-  });
+  }
   return customers.length;
 }
 
