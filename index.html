@@ -484,12 +484,20 @@ function processScan(barcode) {
     }, 3000);
   } else {
     dot.style.background = '#c0392b'; nameEl.style.color = '#c0392b';
-    nameEl.textContent = 'Not found'; subEl.textContent = 'Barcode: ' + barcode;
+    nameEl.textContent = 'Not found';
+    // Show debug: what was scanned vs first few stored barcodes
+    // Show character codes to reveal hidden characters
+    const scanCodes = Array.from(rawBarcode).map(c => c.charCodeAt(0)).join(',');
+    const match = customers.find(c => c.barcode.includes(rawBarcode) || rawBarcode.includes(c.barcode));
+    const storedCodes = match
+      ? Array.from(match.barcode).map(c => c.charCodeAt(0)).join(',')
+      : customers.slice(0, 1).map(c => Array.from(c.barcode).map(ch => ch.charCodeAt(0)).join(',')).join('');
+    subEl.innerHTML = 'Scan: "' + esc(rawBarcode) + '" [' + scanCodes + ']<br>Stored: "' + esc(match ? match.barcode : customers[0]?.barcode || '') + '" [' + storedCodes + ']';
     setTimeout(() => {
       dot.style.background = '#d1d1d6'; nameEl.style.color = '#1c1c1e';
       nameEl.textContent = 'Ready to scan';
       subEl.textContent = 'Tap here if scanning stops working';
-    }, 2500);
+    }, 10000);
   }
 }
 
