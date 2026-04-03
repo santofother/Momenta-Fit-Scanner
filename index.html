@@ -331,29 +331,25 @@ function applyRows(rows) {
   customers = [];
   if (!rows || rows.length === 0) return 0;
 
-  // Auto-detect column order from header row
-  let nameCol = 0, barcodeCol = 1, startRow = 0;
+  // Auto-detect columns by scanning header row for known labels
+  let nameCol = -1, barcodeCol = -1, startRow = 0;
   const first = rows[0];
-  if (first && first.length >= 2) {
-    const h0 = String(first[0]).trim().toLowerCase();
-    const h1 = String(first[1]).trim().toLowerCase();
-    const headers = ['name', 'barcode', 'id', 'code', 'member', 'customer', 'number', 'card'];
-    const isHeader = headers.some(h => h0.includes(h) || h1.includes(h));
-    if (isHeader) {
-      startRow = 1; // skip header row
-      // If first column looks like barcode/id/code/number, swap columns
-      if (['barcode','id','code','number','card'].some(h => h0.includes(h)) &&
-          !['barcode','id','code','number','card'].some(h => h1.includes(h))) {
-        nameCol = 1; barcodeCol = 0;
-      } else if (['name','member','customer'].some(h => h1.includes(h)) &&
-                 !['name','member','customer'].some(h => h0.includes(h))) {
-        nameCol = 1; barcodeCol = 0;
-      }
+  if (first) {
+    const barcodeLabels = ['barcode', 'id', 'code', 'number', 'card', 'member id', 'member_id', 'memberid'];
+    const nameLabels = ['name', 'member', 'customer', 'client', 'full name', 'full_name', 'fullname'];
+    for (let i = 0; i < first.length; i++) {
+      const h = String(first[i]).trim().toLowerCase();
+      if (barcodeCol === -1 && barcodeLabels.some(l => h === l || h.includes(l))) barcodeCol = i;
+      if (nameCol === -1 && nameLabels.some(l => h === l || h.includes(l))) nameCol = i;
     }
+    // If we found at least one header label, skip the header row
+    if (nameCol !== -1 || barcodeCol !== -1) startRow = 1;
   }
+  // Fallback: if columns weren't detected, assume col 0 = barcode/id, col 1 = name
+  if (barcodeCol === -1) barcodeCol = 0;
+  if (nameCol === -1) nameCol = (barcodeCol === 0) ? 1 : 0;
 
-  console.log('Header detection:', { nameCol, barcodeCol, startRow, firstRow: first?.map(c => String(c).trim()) });
-  console.log('Raw rows (first 5):', rows.slice(0, 5).map(r => r?.map(c => String(c).trim())));
+  console.log('Column detection:', { nameCol, barcodeCol, startRow, headers: first?.map(c => String(c).trim()) });
 
   for (let i = startRow; i < rows.length; i++) {
     const row = rows[i];
