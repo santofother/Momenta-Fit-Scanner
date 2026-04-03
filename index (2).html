@@ -1,0 +1,483 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Check-in">
+<title>Check-in Scanner</title>
+<link rel="manifest" href="/manifest.json">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg: #ffffff; --bg2: #f5f5f7; --border: #d1d1d6; --border2: #e5e5ea;
+    --text: #1c1c1e; --text2: #6c6c70;
+    --green: #1a7a3a; --green-bg: #e8f7ee;
+    --red: #c0392b; --red-bg: #fff0f0;
+    --blue: #007aff;
+    --radius: 12px; --radius-sm: 8px;
+    --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    --mono: 'SF Mono', ui-monospace, monospace;
+    --safe-top: env(safe-area-inset-top);
+    --safe-bottom: env(safe-area-inset-bottom);
+  }
+  body {
+    font-family: var(--font); background: var(--bg2); color: var(--text);
+    min-height: 100vh; min-height: -webkit-fill-available;
+    padding-top: var(--safe-top); padding-bottom: var(--safe-bottom);
+  }
+
+  /* ── Setup screen ── */
+  #setup {
+    position: fixed; inset: 0; background: var(--bg2);
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    z-index: 100; padding: 1.5rem;
+  }
+  #setup.hidden { display: none; }
+  .setup-card {
+    background: var(--bg); border-radius: var(--radius); border: 1px solid var(--border2);
+    padding: 2rem; max-width: 400px; width: 100%; text-align: center;
+  }
+  .setup-card .icon { font-size: 40px; margin-bottom: 12px; }
+  .setup-card h1 { font-size: 20px; font-weight: 600; margin-bottom: 8px; }
+  .setup-card p { font-size: 14px; color: var(--text2); line-height: 1.5; margin-bottom: 1.5rem; }
+  #setup-error { color: var(--red); font-size: 13px; margin-top: 10px; min-height: 18px; }
+  .setup-note {
+    font-size: 12px; color: var(--text2); margin-top: 1rem; text-align: left;
+    background: var(--bg2); border-radius: var(--radius-sm); padding: 10px 14px;
+    border: 1px solid var(--border2); line-height: 1.6;
+  }
+
+  /* ── App ── */
+  #app { display: none; max-width: 680px; margin: 0 auto; padding: 1rem; }
+  #app.visible { display: block; }
+
+  /* ── Status card ── */
+  .status-card {
+    background: var(--bg); border-radius: var(--radius); border: 1px solid var(--border2);
+    padding: 1.5rem; text-align: center; margin-bottom: 1rem; cursor: pointer;
+    min-height: 110px; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 6px;
+    -webkit-user-select: none; user-select: none;
+  }
+  #status-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--border); transition: background .2s; }
+  #status-name { font-size: 26px; font-weight: 500; transition: color .2s; }
+  #status-sub { font-size: 13px; color: var(--text2); }
+
+  /* ── Fields ── */
+  .field {
+    width: 100%; padding: 9px 12px; border: 1px solid var(--border);
+    border-radius: var(--radius-sm); font-size: 16px; background: var(--bg);
+    color: var(--text); font-family: var(--font); outline: none; -webkit-appearance: none;
+  }
+  .field:focus { border-color: var(--blue); box-shadow: 0 0 0 3px rgba(0,122,255,.15); }
+
+  /* ── Tabs ── */
+  .tabs {
+    display: flex; align-items: center; border-bottom: 1px solid var(--border2);
+    margin-bottom: 1rem;
+  }
+  .tab-btn {
+    background: none; border: none; border-bottom: 2px solid transparent;
+    padding: 10px 16px; cursor: pointer; font-size: 14px; color: var(--text2);
+    font-family: var(--font); margin-bottom: -1px; -webkit-user-select: none;
+  }
+  .tab-btn.active { color: var(--text); border-bottom-color: var(--text); font-weight: 500; }
+  #customer-count { margin-left: auto; font-size: 12px; color: var(--text2); padding-right: 4px; }
+
+  /* ── Panels ── */
+  .panel { display: none; }
+  .panel.active { display: block; }
+
+  /* ── Buttons ── */
+  .btn {
+    background: none; border: 1px solid var(--border); border-radius: var(--radius-sm);
+    padding: 7px 14px; cursor: pointer; font-size: 13px; color: var(--text);
+    font-family: var(--font); white-space: nowrap; -webkit-user-select: none;
+  }
+  .btn:active { opacity: .6; }
+  .btn-primary { background: var(--text); color: var(--bg); border-color: var(--text); }
+  .btn-danger { color: var(--red); border-color: var(--red); }
+
+  /* ── Tables ── */
+  .table-wrap {
+    background: var(--bg); border: 1px solid var(--border2);
+    border-radius: var(--radius); overflow: hidden;
+  }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th {
+    text-align: left; padding: 8px 12px; font-size: 11px; color: var(--text2);
+    font-weight: 500; border-bottom: 1px solid var(--border2);
+    text-transform: uppercase; letter-spacing: .05em; background: var(--bg2);
+  }
+  td { padding: 10px 12px; border-bottom: 1px solid var(--border2); }
+  tr:last-child td { border-bottom: none; }
+  .mono { font-family: var(--mono); font-size: 12px; color: var(--text2); }
+  .fw { font-weight: 500; }
+  .empty { text-align: center; padding: 2rem; color: var(--text2); font-size: 13px; }
+
+  /* ── Settings panel ── */
+  .settings-section {
+    background: var(--bg); border: 1px solid var(--border2); border-radius: var(--radius);
+    padding: 1.25rem; margin-bottom: 1rem;
+  }
+  .settings-title { font-size: 14px; font-weight: 500; margin-bottom: 4px; }
+  .settings-sub { font-size: 13px; color: var(--text2); margin-bottom: 12px; line-height: 1.5; }
+  .settings-meta { font-size: 12px; color: var(--text2); margin-top: 8px; }
+
+  /* ── Misc ── */
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .scan-wrap { margin-bottom: 1rem; }
+</style>
+</head>
+<body>
+
+<!-- SETUP SCREEN (shown only when no customers loaded) -->
+<div id="setup">
+  <div class="setup-card">
+    <div class="icon">📋</div>
+    <h1>Check-in Scanner</h1>
+    <p>Upload your customer CSV once. It'll be saved on this iPad so you never have to do this again.</p>
+    <input type="file" id="setup-file" accept=".csv,.xlsx,.xls" style="display:none" onchange="handleSetupLoad(event)">
+    <button class="btn btn-primary" style="width:100%;padding:11px;font-size:15px;"
+      onclick="document.getElementById('setup-file').click()">
+      Upload customer file
+    </button>
+    <div id="setup-error"></div>
+    <div class="setup-note">
+      <strong>Format:</strong> CSV or Excel with two columns — <strong>Name</strong> and <strong>Barcode</strong>. Header row is optional.<br><br>
+      Customer data is saved only on this iPad. Nothing is uploaded to the internet.
+    </div>
+  </div>
+</div>
+
+<!-- MAIN APP -->
+<div id="app">
+
+  <div class="status-card" onclick="focusScan()">
+    <div id="status-dot"></div>
+    <div id="status-name">Ready to scan</div>
+    <div id="status-sub">Tap here if scanning stops working</div>
+  </div>
+
+  <div class="scan-wrap">
+    <input id="scan-input" type="text" class="field"
+      placeholder="Scanner active — keep focused between scans..."
+      autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
+  </div>
+
+  <div class="tabs">
+    <button class="tab-btn active" onclick="switchTab('checkins')">Check-in log</button>
+    <button class="tab-btn" onclick="switchTab('customers')">Customers</button>
+    <button class="tab-btn" onclick="switchTab('settings')">⚙︎</button>
+    <span id="customer-count"></span>
+  </div>
+
+  <!-- Check-in log -->
+  <div id="panel-checkins" class="panel active">
+    <div class="row" style="justify-content:space-between;margin-bottom:12px;">
+      <span style="font-size:13px;color:var(--text2);" id="checkin-count">0 check-ins</span>
+      <div class="row">
+        <button class="btn" onclick="exportCheckins()">Export CSV</button>
+        <button class="btn btn-danger" onclick="clearCheckins()">Clear log</button>
+      </div>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Name</th><th>Barcode</th><th>Time</th><th>Date</th></tr></thead>
+        <tbody id="checkin-tbody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Customers -->
+  <div id="panel-customers" class="panel">
+    <div style="margin-bottom:10px;">
+      <input id="search-input" type="text" class="field" placeholder="Search customers…" oninput="renderCustomers()">
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Name</th><th>Barcode / ID</th></tr></thead>
+        <tbody id="customers-tbody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Settings -->
+  <div id="panel-settings" class="panel">
+    <div class="settings-section">
+      <div class="settings-title">Customer list</div>
+      <div class="settings-sub">Upload a new CSV to replace the current customer list. This will update the saved data on this iPad.</div>
+      <input type="file" id="replace-file" accept=".csv,.xlsx,.xls" style="display:none" onchange="handleReplaceLoad(event)">
+      <button class="btn btn-primary" onclick="document.getElementById('replace-file').click()">
+        Replace customer file
+      </button>
+      <div id="replace-result" class="settings-meta"></div>
+    </div>
+
+    <div class="settings-section">
+      <div class="settings-title">Check-in history</div>
+      <div class="settings-sub">Check-in logs are kept only in memory for the current session and are cleared when the app is closed or refreshed.</div>
+      <button class="btn" onclick="exportCheckins()">Export current log</button>
+    </div>
+
+    <div class="settings-section" style="border-color:var(--red-bg);">
+      <div class="settings-title" style="color:var(--red)">Clear all data</div>
+      <div class="settings-sub">Remove the saved customer list from this iPad. You'll need to upload a new CSV file next time.</div>
+      <button class="btn btn-danger" onclick="clearAllData()">Clear customer data</button>
+    </div>
+  </div>
+
+</div>
+
+<script>
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('/sw.js').catch(() => {});
+}
+
+let customers = [];
+let checkins  = [];
+
+// ── Boot ─────────────────────────────────────────────────────────
+function boot() {
+  try {
+    const saved = localStorage.getItem('checkin_customers');
+    if (saved) {
+      customers = JSON.parse(saved);
+      if (customers.length > 0) { launchApp(); return; }
+    }
+  } catch(e) {}
+  // No saved data — show setup
+  document.getElementById('setup').classList.remove('hidden');
+}
+
+function launchApp() {
+  document.getElementById('setup').classList.add('hidden');
+  document.getElementById('app').classList.add('visible');
+  checkins = [];
+  renderAll();
+  setTimeout(focusScan, 400);
+}
+
+// ── CSV load (setup) ──────────────────────────────────────────────
+function handleSetupLoad(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  const errEl = document.getElementById('setup-error');
+  errEl.textContent = '';
+  readFile(file, (rows, err) => {
+    if (err) { errEl.textContent = 'Error reading file: ' + err; return; }
+    const n = applyRows(rows);
+    if (n === 0) { errEl.textContent = 'No valid customers found. Check Name and Barcode columns.'; return; }
+    saveCustomers();
+    launchApp();
+  });
+  e.target.value = '';
+}
+
+// ── CSV replace (settings) ────────────────────────────────────────
+function handleReplaceLoad(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  const resEl = document.getElementById('replace-result');
+  resEl.textContent = 'Loading…';
+  readFile(file, (rows, err) => {
+    if (err) { resEl.style.color = 'var(--red)'; resEl.textContent = 'Error: ' + err; return; }
+    const n = applyRows(rows);
+    if (n === 0) { resEl.style.color = 'var(--red)'; resEl.textContent = 'No valid customers found.'; return; }
+    saveCustomers();
+    renderAll();
+    resEl.style.color = 'var(--green)';
+    resEl.textContent = '✓ Loaded ' + n + ' customers and saved to this iPad.';
+  });
+  e.target.value = '';
+}
+
+function readFile(file, cb) {
+  const reader = new FileReader();
+  reader.onerror = () => cb(null, 'Could not read file.');
+  reader.onload = function(ev) {
+    try {
+      let rows;
+      if (file.name.match(/\.csv$/i)) {
+        rows = parseCSV(ev.target.result);
+      } else {
+        const wb = XLSX.read(ev.target.result, { type: 'binary' });
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+      }
+      cb(rows, null);
+    } catch(err) { cb(null, err.message); }
+  };
+  file.name.match(/\.csv$/i) ? reader.readAsText(file) : reader.readAsBinaryString(file);
+}
+
+function parseCSV(text) {
+  return text.trim().split('\n').map(line => {
+    const cols = []; let cur = '', inQ = false;
+    for (const ch of line) {
+      if (ch === '"') inQ = !inQ;
+      else if (ch === ',' && !inQ) { cols.push(cur.trim()); cur = ''; }
+      else cur += ch;
+    }
+    cols.push(cur.trim());
+    return cols;
+  });
+}
+
+function applyRows(rows) {
+  customers = [];
+  rows.forEach(row => {
+    if (!row || row.length < 2) return;
+    const name    = String(row[0]).trim();
+    const barcode = String(row[1]).trim();
+    if (!name || !barcode || name.toLowerCase() === 'name') return;
+    if (customers.find(c => c.barcode === barcode)) return;
+    customers.push({ name, barcode });
+  });
+  return customers.length;
+}
+
+function saveCustomers() {
+  try { localStorage.setItem('checkin_customers', JSON.stringify(customers)); } catch(e) {}
+}
+
+// ── Render ────────────────────────────────────────────────────────
+function renderAll() { renderCustomers(); renderCheckins(); updateBadge(); }
+
+function updateBadge() {
+  document.getElementById('customer-count').textContent = customers.length + ' customers';
+}
+
+function renderCustomers() {
+  const q  = (document.getElementById('search-input').value || '').toLowerCase();
+  const tb = document.getElementById('customers-tbody');
+  const list = customers.filter(c =>
+    !q || c.name.toLowerCase().includes(q) || c.barcode.toLowerCase().includes(q));
+  if (!list.length) {
+    tb.innerHTML = '<tr><td colspan="2" class="empty">No customers match.</td></tr>'; return;
+  }
+  tb.innerHTML = list.map(c =>
+    `<tr><td class="fw">${esc(c.name)}</td><td class="mono">${esc(c.barcode)}</td></tr>`
+  ).join('');
+}
+
+function renderCheckins() {
+  const tb     = document.getElementById('checkin-tbody');
+  const today  = new Date().toLocaleDateString();
+  const todayN = checkins.filter(c => c.date === today).length;
+  document.getElementById('checkin-count').textContent =
+    todayN + ' check-in' + (todayN !== 1 ? 's' : '') + ' today · ' + checkins.length + ' total';
+  if (!checkins.length) {
+    tb.innerHTML = '<tr><td colspan="4" class="empty">No check-ins yet. Start scanning!</td></tr>'; return;
+  }
+  tb.innerHTML = [...checkins].reverse().map(c =>
+    `<tr>
+      <td class="fw">${esc(c.name)}</td>
+      <td class="mono">${esc(c.barcode)}</td>
+      <td>${esc(c.time)}</td>
+      <td style="color:var(--text2)">${esc(c.date)}</td>
+    </tr>`
+  ).join('');
+}
+
+function esc(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ── Tabs ──────────────────────────────────────────────────────────
+function switchTab(name) {
+  document.querySelectorAll('.tab-btn').forEach((b, i) =>
+    b.classList.toggle('active', ['checkins','customers','settings'][i] === name));
+  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+  document.getElementById('panel-' + name).classList.add('active');
+  if (name === 'checkins') focusScan();
+}
+
+// ── Scanner ───────────────────────────────────────────────────────
+function focusScan() { document.getElementById('scan-input').focus(); }
+
+const scanInput = document.getElementById('scan-input');
+scanInput.addEventListener('keydown', function(e) {
+  if (e.key !== 'Enter') return;
+  e.preventDefault();
+  const val = scanInput.value.trim();
+  scanInput.value = '';
+  if (val) processScan(val);
+});
+scanInput.addEventListener('blur', function() {
+  if (!document.getElementById('setup').classList.contains('hidden')) return;
+  setTimeout(focusScan, 300);
+});
+
+function processScan(barcode) {
+  scanInput.value = '';
+  const now  = new Date();
+  const time = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  const date = now.toLocaleDateString();
+  const dot    = document.getElementById('status-dot');
+  const nameEl = document.getElementById('status-name');
+  const subEl  = document.getElementById('status-sub');
+  const customer = customers.find(c => c.barcode.trim() === barcode.trim());
+
+  if (customer) {
+    dot.style.background = '#1a7a3a'; nameEl.style.color = '#1a7a3a';
+    nameEl.textContent = customer.name; subEl.textContent = 'Checked in at ' + time;
+    checkins.push({ name: customer.name, barcode, time, date });
+    renderCheckins();
+    setTimeout(() => {
+      dot.style.background = '#d1d1d6'; nameEl.style.color = '#1c1c1e';
+      nameEl.textContent = 'Ready to scan';
+      subEl.textContent = 'Last: ' + customer.name + ' at ' + time;
+    }, 3000);
+  } else {
+    dot.style.background = '#c0392b'; nameEl.style.color = '#c0392b';
+    nameEl.textContent = 'Not found'; subEl.textContent = 'Barcode: ' + barcode;
+    setTimeout(() => {
+      dot.style.background = '#d1d1d6'; nameEl.style.color = '#1c1c1e';
+      nameEl.textContent = 'Ready to scan';
+      subEl.textContent = 'Tap here if scanning stops working';
+    }, 2500);
+  }
+}
+
+// ── Export / clear ────────────────────────────────────────────────
+function exportCheckins() {
+  if (!checkins.length) { alert('No check-ins to export.'); return; }
+  const rows = [['Name','Barcode','Time','Date'],
+    ...checkins.map(c => [c.name, c.barcode, c.time, c.date])];
+  const csv = rows.map(r => r.map(v => '"' + String(v).replace(/"/g,'""') + '"').join(',')).join('\n');
+  const a = Object.assign(document.createElement('a'), {
+    href: URL.createObjectURL(new Blob([csv], { type: 'text/csv' })),
+    download: 'checkins-' + new Date().toISOString().slice(0,10) + '.csv'
+  });
+  a.click();
+}
+
+function clearCheckins() {
+  if (!confirm('Clear the check-in log for this session?')) return;
+  checkins = []; renderCheckins();
+}
+
+function clearAllData() {
+  if (!confirm('This will remove the customer list from this iPad. You\'ll need to upload it again next time. Continue?')) return;
+  customers = []; checkins = [];
+  try { localStorage.removeItem('checkin_customers'); } catch(e) {}
+  document.getElementById('setup').classList.remove('hidden');
+  document.getElementById('app').classList.remove('visible');
+}
+
+// Keep scanner focused
+setInterval(() => {
+  if (document.getElementById('app').classList.contains('visible') &&
+      document.getElementById('panel-checkins').classList.contains('active')) {
+    focusScan();
+  }
+}, 2000);
+
+boot();
+</script>
+</body>
+</html>
