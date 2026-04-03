@@ -332,7 +332,10 @@ function applyRows(rows) {
   rows.forEach(row => {
     if (!row || row.length < 2) return;
     const name    = String(row[0]).trim();
-    const barcode = String(row[1]).trim();
+    // Force barcode to string — Excel may pass it as a number (losing leading zeros, adding decimals)
+    let barcode = String(row[1]).trim();
+    // Remove trailing ".0" that Excel adds to whole numbers (e.g. "12345.0" → "12345")
+    barcode = barcode.replace(/\.0$/, '');
     if (!name || !barcode || name.toLowerCase() === 'name') return;
     if (customers.find(c => c.barcode === barcode)) return;
     customers.push({ name, barcode });
@@ -451,13 +454,23 @@ scanInput.addEventListener('blur', function() {
 
 function processScan(barcode) {
   scanInput.value = '';
+  // Normalize: strip whitespace and leading zeros so "007123" matches "7123" and vice versa
+  const rawBarcode = barcode.trim();
+  const normBarcode = rawBarcode.replace(/^0+/, '') || '0';
+
+  console.log('Scanned raw:', JSON.stringify(rawBarcode), 'normalized:', normBarcode);
+  console.log('First 5 customers:', customers.slice(0, 5).map(c => JSON.stringify(c.barcode)));
+
   const now  = new Date();
   const time = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
   const date = now.toLocaleDateString();
   const dot    = document.getElementById('status-dot');
   const nameEl = document.getElementById('status-name');
   const subEl  = document.getElementById('status-sub');
-  const customer = customers.find(c => c.barcode.trim() === barcode.trim());
+  const customer = customers.find(c => {
+    const normStored = c.barcode.trim().replace(/^0+/, '') || '0';
+    return normStored === normBarcode || c.barcode.trim() === rawBarcode;
+  });
 
   if (customer) {
     dot.style.background = '#1a7a3a'; nameEl.style.color = '#1a7a3a';
