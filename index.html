@@ -400,13 +400,50 @@ function switchTab(name) {
 function focusScan() { document.getElementById('scan-input').focus(); }
 
 const scanInput = document.getElementById('scan-input');
-scanInput.addEventListener('keydown', function(e) {
-  if (e.key !== 'Enter') return;
-  e.preventDefault();
-  const val = scanInput.value.trim();
-  scanInput.value = '';
-  if (val) processScan(val);
+
+// Buffer-based scanner detection at the document level.
+// External barcode scanners type characters very rapidly (all within ~80ms).
+// We collect rapid keystrokes into a buffer and process on Enter or timeout.
+let scanBuffer = '';
+let scanTimeout = null;
+const SCAN_CHAR_TIMEOUT = 100; // max ms between characters for scanner input
+
+document.addEventListener('keydown', function(e) {
+  // Ignore if setup screen is showing or user is in a non-scan input
+  if (!document.getElementById('setup').classList.contains('hidden')) return;
+  const tag = (e.target.tagName || '').toLowerCase();
+  const isScanField = e.target === scanInput;
+  const isSearchField = e.target === document.getElementById('search-input');
+
+  // If typing in search field, let it through normally
+  if (isSearchField) return;
+
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    clearTimeout(scanTimeout);
+    // Grab from buffer or from the input field (whichever has content)
+    const val = (scanBuffer || scanInput.value).trim();
+    scanBuffer = '';
+    scanInput.value = '';
+    if (val) processScan(val);
+    return;
+  }
+
+  // Only buffer printable single characters (ignore Shift, Ctrl, etc.)
+  if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
+    scanBuffer += e.key;
+    // Also put it in the visible input so user sees what's being scanned
+    if (!isScanField) {
+      scanInput.value += e.key;
+      e.preventDefault();
+    }
+    clearTimeout(scanTimeout);
+    // If no new character arrives within timeout, clear the buffer
+    // (it was probably manual typing, not a scanner)
+    scanTimeout = setTimeout(() => { scanBuffer = ''; }, SCAN_CHAR_TIMEOUT);
+  }
 });
+
 scanInput.addEventListener('blur', function() {
   if (!document.getElementById('setup').classList.contains('hidden')) return;
   setTimeout(focusScan, 300);
