@@ -352,6 +352,9 @@ function applyRows(rows) {
     }
   }
 
+  console.log('Header detection:', { nameCol, barcodeCol, startRow, firstRow: first?.map(c => String(c).trim()) });
+  console.log('Raw rows (first 5):', rows.slice(0, 5).map(r => r?.map(c => String(c).trim())));
+
   for (let i = startRow; i < rows.length; i++) {
     const row = rows[i];
     if (!row || row.length < 2) continue;
