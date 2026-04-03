@@ -331,33 +331,13 @@ function applyRows(rows) {
   customers = [];
   if (!rows || rows.length === 0) return 0;
 
-  // Auto-detect columns by scanning header row for known labels
-  let nameCol = -1, barcodeCol = -1, startRow = 0;
-  const first = rows[0];
-  if (first) {
-    const barcodeLabels = ['barcode', 'id', 'code', 'number', 'card', 'member id', 'member_id', 'memberid'];
-    const nameLabels = ['name', 'member', 'customer', 'client', 'full name', 'full_name', 'fullname'];
-    for (let i = 0; i < first.length; i++) {
-      const h = String(first[i]).trim().toLowerCase();
-      if (barcodeCol === -1 && barcodeLabels.some(l => h === l || h.includes(l))) barcodeCol = i;
-      if (nameCol === -1 && nameLabels.some(l => h === l || h.includes(l))) nameCol = i;
-    }
-    // If we found at least one header label, skip the header row
-    if (nameCol !== -1 || barcodeCol !== -1) startRow = 1;
-  }
-  // Fallback: if columns weren't detected, assume col 0 = barcode/id, col 1 = name
-  if (barcodeCol === -1) barcodeCol = 0;
-  if (nameCol === -1) nameCol = (barcodeCol === 0) ? 1 : 0;
-
-  console.log('Column detection:', { nameCol, barcodeCol, startRow, headers: first?.map(c => String(c).trim()) });
-
-  for (let i = startRow; i < rows.length; i++) {
+  // Column 0 = ID/barcode, Column 1 = Name. Skip header row.
+  for (let i = 1; i < rows.length; i++) {
     const row = rows[i];
     if (!row || row.length < 2) continue;
-    const name = String(row[nameCol]).trim();
-    // Force barcode to string — Excel may pass it as a number (losing leading zeros, adding decimals)
-    let barcode = String(row[barcodeCol]).trim();
-    // Remove trailing ".0" that Excel adds to whole numbers (e.g. "12345.0" → "12345")
+    let barcode = String(row[0]).trim();
+    const name = String(row[1]).trim();
+    // Remove trailing ".0" that Excel adds to whole numbers
     barcode = barcode.replace(/\.0$/, '');
     if (!name || !barcode) continue;
     if (customers.find(c => c.barcode === barcode)) continue;
