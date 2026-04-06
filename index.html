@@ -664,18 +664,12 @@ async function syncToCloud(checkin) {
     return;
   }
   setSyncStatus('pending', 'Syncing...');
-  // Use YYYY-MM-DD for the sheet tab name
-  const isoDate = new Date().toISOString().slice(0, 10);
+  const isoDate = new Date().toISOString().slice(0, 7);
+  const payload = encodeURIComponent(JSON.stringify({ date: isoDate, checkins: [checkin] }));
   try {
-    await fetch(GOOGLE_SCRIPT_URL, {
-      method: 'POST',
-      mode: 'no-cors',
-      headers: { 'Content-Type': 'text/plain' },
-      body: JSON.stringify({ date: isoDate, checkins: [checkin] })
-    });
-    // mode:'no-cors' means we can't read the response, but data IS sent
+    // Use GET with data in URL param — POST body gets dropped on Apps Script 302 redirect
+    await fetch(GOOGLE_SCRIPT_URL + '?data=' + payload, { mode: 'no-cors' });
     setSyncStatus('ok', 'Synced');
-    // Clear any queued items too
     flushSyncQueue();
   } catch (err) {
     console.warn('Cloud sync failed:', err);
@@ -698,13 +692,11 @@ async function flushSyncQueue() {
   try { queue = JSON.parse(localStorage.getItem('sync_queue') || '[]'); } catch(e) { return; }
   if (!queue.length) return;
   setSyncStatus('pending', 'Syncing ' + queue.length + ' queued...');
+  const payload = encodeURIComponent(JSON.stringify({
+    date: new Date().toISOString().slice(0, 7), checkins: queue
+  }));
   try {
-    await fetch(GOOGLE_SCRIPT_URL, {
-      method: 'POST',
-      mode: 'no-cors',
-      headers: { 'Content-Type': 'text/plain' },
-      body: JSON.stringify({ date: new Date().toISOString().slice(0, 10), checkins: queue })
-    });
+    await fetch(GOOGLE_SCRIPT_URL + '?data=' + payload, { mode: 'no-cors' });
     localStorage.setItem('sync_queue', '[]');
     setSyncStatus('ok', 'Synced (' + queue.length + ' queued)');
   } catch (e) {
