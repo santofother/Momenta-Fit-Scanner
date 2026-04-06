@@ -666,23 +666,14 @@ function setSyncStatus(state, msg) {
 }
 
 function sendToGoogle(url) {
-  // Use a hidden iframe to make the GET request
-  // Iframes follow redirects natively and have no CORS issues
+  // Use Image request — simplest cross-origin GET, always follows redirects
   return new Promise((resolve) => {
-    const iframe = document.createElement('iframe');
-    iframe.style.display = 'none';
-    iframe.src = url;
-    iframe.onload = () => {
-      setTimeout(() => { document.body.removeChild(iframe); }, 1000);
-      resolve('ok');
-    };
-    iframe.onerror = () => {
-      setTimeout(() => { document.body.removeChild(iframe); }, 1000);
-      resolve('sent'); // request likely still went through
-    };
-    document.body.appendChild(iframe);
-    // Fallback: resolve after 8 seconds regardless
-    setTimeout(() => { resolve('sent'); }, 8000);
+    const img = new Image();
+    img.onload = () => resolve('ok');
+    img.onerror = () => resolve('sent'); // server still processed it, just not an image
+    img.src = url;
+    // Fallback timeout
+    setTimeout(() => resolve('sent'), 8000);
   });
 }
 
