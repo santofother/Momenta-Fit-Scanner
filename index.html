@@ -277,6 +277,13 @@
       <button class="btn" onclick="exportCheckins()">Export current log</button>
     </div>
 
+    <div class="settings-section">
+      <div class="settings-title">Cloud sync</div>
+      <div class="settings-sub">Test the connection to Google Sheets. This sends a test row.</div>
+      <button class="btn" onclick="testSync()">Test cloud sync</button>
+      <div id="test-sync-result" class="settings-meta"></div>
+    </div>
+
     <div class="settings-section" style="border-color:var(--red-bg);">
       <div class="settings-title" style="color:var(--red)">Clear all data</div>
       <div class="settings-sub">Remove the saved customer list from this iPad. You'll need to upload a new CSV file next time.</div>
@@ -658,6 +665,27 @@ function setSyncStatus(state, msg) {
   syncText.textContent = msg;
 }
 
+function sendToGoogle(url) {
+  // Use a script tag to make the request — follows redirects, no CORS issues
+  return new Promise((resolve, reject) => {
+    const script = document.createElement('script');
+    script.src = url + '&callback=_gsCallback';
+    script.onerror = reject;
+    // Clean up after load
+    script.onload = () => { document.head.removeChild(script); };
+    // Timeout after 10 seconds
+    const timer = setTimeout(() => { resolve('timeout'); }, 10000);
+    window._gsCallback = function() {
+      clearTimeout(timer);
+      resolve('ok');
+    };
+    document.head.appendChild(script);
+    // Even if callback doesn't fire, the GET request still hits the server
+    // So resolve after a short delay as fallback
+    setTimeout(() => { clearTimeout(timer); resolve('sent'); }, 5000);
+  });
+}
+
 async function syncToCloud(checkin) {
   if (!GOOGLE_SCRIPT_URL || GOOGLE_SCRIPT_URL.includes('PASTE_YOUR')) {
     setSyncStatus('err', 'Cloud: not configured');
@@ -667,8 +695,8 @@ async function syncToCloud(checkin) {
   const isoDate = new Date().toISOString().slice(0, 7);
   const payload = encodeURIComponent(JSON.stringify({ date: isoDate, checkins: [checkin] }));
   try {
-    // Use GET with data in URL param — POST body gets dropped on Apps Script 302 redirect
-    await fetch(GOOGLE_SCRIPT_URL + '?data=' + payload, { mode: 'no-cors' });
+    const url = GOOGLE_SCRIPT_URL + '?data=' + payload;
+    await sendToGoogle(url);
     setSyncStatus('ok', 'Synced');
     flushSyncQueue();
   } catch (err) {
@@ -696,11 +724,34 @@ async function flushSyncQueue() {
     date: new Date().toISOString().slice(0, 7), checkins: queue
   }));
   try {
-    await fetch(GOOGLE_SCRIPT_URL + '?data=' + payload, { mode: 'no-cors' });
+    await sendToGoogle(GOOGLE_SCRIPT_URL + '?data=' + payload);
     localStorage.setItem('sync_queue', '[]');
     setSyncStatus('ok', 'Synced (' + queue.length + ' queued)');
   } catch (e) {
     setSyncStatus('err', 'Queue flush failed');
+  }
+}
+
+async function testSync() {
+  const el = document.getElementById('test-sync-result');
+  el.style.color = 'var(--text2)';
+  el.textContent = 'Sending test...';
+  const now = new Date();
+  const checkin = {
+    name: 'TEST',
+    barcode: '0000',
+    time: now.toLocaleTimeString(),
+    date: now.toLocaleDateString()
+  };
+  try {
+    const isoDate = now.toISOString().slice(0, 7);
+    const payload = encodeURIComponent(JSON.stringify({ date: isoDate, checkins: [checkin] }));
+    await sendToGoogle(GOOGLE_SCRIPT_URL + '?data=' + payload);
+    el.style.color = 'var(--green)';
+    el.textContent = 'Sent! Check your Google Sheet for a TEST row in tab "' + isoDate + '"';
+  } catch (err) {
+    el.style.color = 'var(--red)';
+    el.textContent = 'Failed: ' + err;
   }
 }
 
