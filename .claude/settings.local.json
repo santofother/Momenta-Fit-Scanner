@@ -2,7 +2,13 @@
   "permissions": {
     "allow": [
       "Bash(gh repo:*)",
-      "Bash(gh api:*)"
+      "Bash(gh api:*)",
+      "WebSearch",
+      "WebFetch(domain:gist.github.com)",
+      "WebFetch(domain:docs.socketmobile.com)",
+      "WebFetch(domain:www.socketmobile.com)",
+      "WebFetch(domain:docs.socketmobile.dev)",
+      "WebFetch(domain:www.npmjs.com)"
     ]
   }
 }

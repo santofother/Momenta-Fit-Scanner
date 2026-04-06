@@ -444,7 +444,15 @@ function switchTab(name) {
 }
 
 // ── Scanner ───────────────────────────────────────────────────────
-function focusScan() { document.getElementById('scan-input').focus(); }
+// Synthetic click trick to bypass iOS programmatic focus restriction
+function focusScan() {
+  const input = document.getElementById('scan-input');
+  const event = new MouseEvent('click', {
+    bubbles: true, cancelable: true, view: window
+  });
+  input.dispatchEvent(event);
+  input.focus();
+}
 
 const scanInput = document.getElementById('scan-input');
 
@@ -483,6 +491,8 @@ document.addEventListener('keydown', function(e) {
     if (!isScanField) {
       scanInput.value += e.key;
       e.preventDefault();
+      // Try to grab focus for subsequent characters
+      scanInput.focus();
     }
     clearTimeout(scanTimeout);
     // If no new character arrives within timeout, clear the buffer
@@ -510,6 +520,15 @@ function updateFocusState() {
 scanInput.addEventListener('focus', updateFocusState);
 scanInput.addEventListener('blur', function() {
   updateFocusState();
+  // Re-focus automatically unless user is interacting with another part of the app
+  if (!document.getElementById('panel-checkins').classList.contains('active')) return;
+  setTimeout(() => {
+    // Don't steal focus if user tapped a button/input/search
+    const active = document.activeElement;
+    const tag = (active && active.tagName || '').toLowerCase();
+    if (tag === 'input' || tag === 'button' || tag === 'select' || tag === 'textarea') return;
+    scanInput.focus();
+  }, 300);
 });
 
 // Tap ANYWHERE on the app to focus the scan input (iOS allows .focus() from user gestures)
@@ -598,21 +617,42 @@ function clearAllData() {
   document.getElementById('app').classList.remove('visible');
 }
 
-// Keep focus indicator up to date
+// Keep focus on scan input and indicator up to date
 setInterval(() => {
   if (document.getElementById('app').classList.contains('visible') &&
       document.getElementById('panel-checkins').classList.contains('active')) {
     updateFocusState();
+    // Try to maintain focus (works on non-iOS; on iOS only works after first user tap)
+    if (document.activeElement !== scanInput) {
+      const tag = (document.activeElement && document.activeElement.tagName || '').toLowerCase();
+      if (tag !== 'input' && tag !== 'button' && tag !== 'select' && tag !== 'textarea') {
+        scanInput.focus();
+      }
+    }
   }
-}, 1000);
+}, 2000);
 
 // ── Keyboard detection ───────────────────────────────────────────
-// When the scan input is focused and the software keyboard opens,
-// the visual viewport shrinks. Socket Mobile Keyboard (Bluetooth)
-// does NOT open a software keyboard, so viewport stays full height.
-// If viewport shrinks → wrong keyboard is selected → show warning.
+// Detect wrong keyboard by checking if the software keyboard is visible.
+// When Socket Mobile Keyboard is selected → no software keyboard → viewport stays full.
+// When wrong keyboard is selected → software keyboard appears → viewport shrinks.
+// We store the full viewport height on load and poll for changes.
 let kbDismissed = false;
+let fullViewportHeight = 0;
 const kbWarningEl = document.getElementById('kb-warning');
+
+// Capture the full viewport height before any keyboard opens
+function captureFullHeight() {
+  if (window.visualViewport) {
+    fullViewportHeight = Math.max(fullViewportHeight, window.visualViewport.height);
+  } else {
+    fullViewportHeight = Math.max(fullViewportHeight, window.innerHeight);
+  }
+}
+captureFullHeight();
+// Also capture after a short delay (PWA may still be laying out)
+setTimeout(captureFullHeight, 500);
+setTimeout(captureFullHeight, 1500);
 
 function checkKeyboard() {
   if (kbDismissed) return;
@@ -620,15 +660,22 @@ function checkKeyboard() {
     kbWarningEl.classList.remove('visible');
     return;
   }
-  // Software keyboard is open if viewport height is significantly less than window height
-  const vv = window.visualViewport;
-  if (!vv) return; // not supported (desktop) — skip
-  const shrink = window.innerHeight - vv.height;
-  if (shrink > 100) {
-    // Software keyboard is open → wrong keyboard
+
+  const currentHeight = window.visualViewport
+    ? window.visualViewport.height
+    : window.innerHeight;
+
+  // If we don't have a baseline yet, just record it
+  if (fullViewportHeight === 0) { fullViewportHeight = currentHeight; return; }
+
+  // Software keyboard typically takes 200+ pixels
+  const shrink = fullViewportHeight - currentHeight;
+  if (shrink > 150) {
     kbWarningEl.classList.add('visible');
   } else {
     kbWarningEl.classList.remove('visible');
+    // Update full height in case orientation changed
+    if (currentHeight > fullViewportHeight) fullViewportHeight = currentHeight;
   }
 }
 
@@ -639,9 +686,13 @@ function dismissKbWarning() {
   setTimeout(() => { kbDismissed = false; }, 60000);
 }
 
+// Use BOTH resize event and polling for reliable detection
 if (window.visualViewport) {
   window.visualViewport.addEventListener('resize', checkKeyboard);
 }
+window.addEventListener('resize', checkKeyboard);
+// Poll every 1 second as fallback (resize events can be missed in PWAs)
+setInterval(checkKeyboard, 1000);
 
 boot();
 </script>
