@@ -8,7 +8,17 @@
       "WebFetch(domain:docs.socketmobile.com)",
       "WebFetch(domain:www.socketmobile.com)",
       "WebFetch(domain:docs.socketmobile.dev)",
-      "WebFetch(domain:www.npmjs.com)"
+      "WebFetch(domain:www.npmjs.com)",
+      "WebFetch(domain:developers.google.com)",
+      "WebFetch(domain:stackoverflow.com)",
+      "WebFetch(domain:blog.coupler.io)",
+      "WebFetch(domain:mashe.hawksey.info)",
+      "WebFetch(domain:hawksey.info)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "WebFetch(domain:dev.to)",
+      "WebFetch(domain:docs.sheetdb.io)",
+      "WebFetch(domain:sheet.best)"
     ]
   }
 }

@@ -127,6 +127,18 @@
   .settings-sub { font-size: 13px; color: var(--text2); margin-bottom: 12px; line-height: 1.5; }
   .settings-meta { font-size: 12px; color: var(--text2); margin-top: 8px; }
 
+  /* ── Cloud sync indicator ── */
+  .sync-status {
+    display: inline-flex; align-items: center; gap: 5px;
+    font-size: 11px; color: var(--text2); padding: 4px 0;
+  }
+  .sync-dot {
+    width: 7px; height: 7px; border-radius: 50%; background: var(--border);
+  }
+  .sync-dot.ok { background: var(--green); }
+  .sync-dot.err { background: var(--red); }
+  .sync-dot.pending { background: #e6a817; animation: pulse-hint 1s ease-in-out infinite; }
+
   /* ── Keyboard warning banner ── */
   .kb-warning {
     display: none; position: fixed; bottom: 0; left: 0; right: 0;
@@ -220,6 +232,7 @@
   <div id="panel-checkins" class="panel active">
     <div class="row" style="justify-content:space-between;margin-bottom:12px;">
       <span style="font-size:13px;color:var(--text2);" id="checkin-count">0 check-ins</span>
+      <span id="sync-status" class="sync-status"><span id="sync-dot" class="sync-dot"></span><span id="sync-text">Cloud: idle</span></span>
       <div class="row">
         <button class="btn" onclick="exportCheckins()">Export CSV</button>
         <button class="btn btn-danger" onclick="clearCheckins()">Clear log</button>
@@ -566,6 +579,7 @@ function processScan(barcode) {
     dot.style.background = '#1a7a3a'; nameEl.style.color = '#1a7a3a';
     nameEl.textContent = customer.name; subEl.textContent = 'Checked in at ' + time;
     checkins.push({ name: customer.name, barcode, time, date });
+    syncToCloud({ name: customer.name, barcode, time, date });
     renderCheckins();
     setTimeout(() => {
       dot.style.background = '#d1d1d6'; nameEl.style.color = '#1c1c1e';
@@ -631,6 +645,76 @@ setInterval(() => {
     }
   }
 }, 2000);
+
+// ── Cloud sync to Google Sheets ──────────────────────────────────
+// Set this to your deployed Google Apps Script URL:
+const GOOGLE_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwTgMwsUI_6CTL7Ph9u2J8FUy1p545ZdNR3xFz-mdpFq4by2r1wSb4k46Iw8Ya2WOWf/exec';
+
+const syncDot  = document.getElementById('sync-dot');
+const syncText = document.getElementById('sync-text');
+
+function setSyncStatus(state, msg) {
+  syncDot.className = 'sync-dot ' + state;  // '', 'ok', 'err', 'pending'
+  syncText.textContent = msg;
+}
+
+async function syncToCloud(checkin) {
+  if (!GOOGLE_SCRIPT_URL || GOOGLE_SCRIPT_URL.includes('PASTE_YOUR')) {
+    setSyncStatus('err', 'Cloud: not configured');
+    return;
+  }
+  setSyncStatus('pending', 'Syncing...');
+  // Use YYYY-MM-DD for the sheet tab name
+  const isoDate = new Date().toISOString().slice(0, 10);
+  try {
+    await fetch(GOOGLE_SCRIPT_URL, {
+      method: 'POST',
+      mode: 'no-cors',
+      headers: { 'Content-Type': 'text/plain' },
+      body: JSON.stringify({ date: isoDate, checkins: [checkin] })
+    });
+    // mode:'no-cors' means we can't read the response, but data IS sent
+    setSyncStatus('ok', 'Synced');
+    // Clear any queued items too
+    flushSyncQueue();
+  } catch (err) {
+    console.warn('Cloud sync failed:', err);
+    setSyncStatus('err', 'Offline — queued');
+    queueForRetry(checkin);
+  }
+}
+
+function queueForRetry(checkin) {
+  try {
+    const queue = JSON.parse(localStorage.getItem('sync_queue') || '[]');
+    queue.push(checkin);
+    localStorage.setItem('sync_queue', JSON.stringify(queue));
+  } catch (e) {}
+}
+
+async function flushSyncQueue() {
+  if (!GOOGLE_SCRIPT_URL || GOOGLE_SCRIPT_URL.includes('PASTE_YOUR')) return;
+  let queue;
+  try { queue = JSON.parse(localStorage.getItem('sync_queue') || '[]'); } catch(e) { return; }
+  if (!queue.length) return;
+  setSyncStatus('pending', 'Syncing ' + queue.length + ' queued...');
+  try {
+    await fetch(GOOGLE_SCRIPT_URL, {
+      method: 'POST',
+      mode: 'no-cors',
+      headers: { 'Content-Type': 'text/plain' },
+      body: JSON.stringify({ date: new Date().toISOString().slice(0, 10), checkins: queue })
+    });
+    localStorage.setItem('sync_queue', '[]');
+    setSyncStatus('ok', 'Synced (' + queue.length + ' queued)');
+  } catch (e) {
+    setSyncStatus('err', 'Queue flush failed');
+  }
+}
+
+// Flush retry queue when coming back online or on app start
+window.addEventListener('online', flushSyncQueue);
+flushSyncQueue();
 
 // ── Keyboard detection ───────────────────────────────────────────
 // Detect wrong keyboard by checking if the software keyboard is visible.
