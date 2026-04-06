@@ -205,8 +205,7 @@
   <div class="scan-wrap">
     <input id="scan-input" type="text" class="field"
       placeholder="Scanner active — ready to scan"
-      autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"
-      inputmode="none">
+      autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
     <div id="focus-hint" class="focus-hint">Tap anywhere to activate scanner</div>
   </div>
 
@@ -514,25 +513,13 @@ scanInput.addEventListener('blur', function() {
 });
 
 // Tap ANYWHERE on the app to focus the scan input (iOS allows .focus() from user gestures)
-document.addEventListener('touchstart', function(e) {
-  if (!document.getElementById('app').classList.contains('visible')) return;
-  if (!document.getElementById('panel-checkins').classList.contains('active')) return;
-  // Don't steal focus from search field, buttons, or file inputs
-  const tag = (e.target.tagName || '').toLowerCase();
-  if (tag === 'button' || tag === 'input' || tag === 'select' || tag === 'a') {
-    if (e.target !== scanInput) return;
-  }
-  scanInput.focus();
-}, { passive: true });
-
-// Also handle click for non-touch devices
+// Use 'click' (fires after touch completes) so it doesn't steal the tap from buttons.
 document.addEventListener('click', function(e) {
   if (!document.getElementById('app').classList.contains('visible')) return;
   if (!document.getElementById('panel-checkins').classList.contains('active')) return;
-  const tag = (e.target.tagName || '').toLowerCase();
-  if (tag === 'button' || tag === 'input' || tag === 'select' || tag === 'a') {
-    if (e.target !== scanInput) return;
-  }
+  // Don't steal focus from interactive elements
+  if (e.target.closest('button, a, select, label, .tab-btn, .kb-warning')) return;
+  if (e.target.tagName === 'INPUT' && e.target !== scanInput) return;
   scanInput.focus();
 });
 
