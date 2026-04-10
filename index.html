@@ -365,9 +365,12 @@ function readFile(file, cb) {
       if (file.name.match(/\.csv$/i)) {
         rows = parseCSV(ev.target.result);
       } else {
-        const wb = XLSX.read(ev.target.result, { type: 'binary' });
+        // cellText:true + raw:false forces SheetJS to return the formatted
+        // string value of every cell, preventing long numeric IDs from being
+        // converted to JS numbers (which truncate digits beyond 15 to zeros).
+        const wb = XLSX.read(ev.target.result, { type: 'binary', cellText: true, cellDates: false });
         const ws = wb.Sheets[wb.SheetNames[0]];
-        rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+        rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '', raw: false });
       }
       cb(rows, null);
     } catch(err) { cb(null, err.message); }
@@ -578,8 +581,12 @@ function processScan(barcode) {
   const nameEl = document.getElementById('status-name');
   const subEl  = document.getElementById('status-sub');
   const customer = customers.find(c => {
-    const normStored = c.barcode.trim().replace(/^0+/, '') || '0';
-    return normStored === normBarcode || c.barcode.trim() === rawBarcode;
+    const storedTrimmed = c.barcode.trim();
+    // 1. Exact string match (handles IDs preserved as text, e.g. "1234500000000056")
+    if (storedTrimmed === rawBarcode) return true;
+    // 2. Normalized match — strips leading zeros so "007123" matches "7123"
+    const normStored = storedTrimmed.replace(/^0+/, '') || '0';
+    return normStored === normBarcode;
   });
 
   if (customer) {
