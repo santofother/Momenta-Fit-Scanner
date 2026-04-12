@@ -170,6 +170,40 @@
   }
   .focus-hint.hidden { display: none; }
   @keyframes pulse-hint { 0%,100% { opacity: 1; } 50% { opacity: .4; } }
+
+  /* ── Scanner Setup Guide ── */
+  .setup-guide {
+    background: var(--bg); border-radius: var(--radius); border: 1px solid var(--border2);
+    margin-bottom: 1rem; overflow: hidden;
+  }
+  .setup-guide-toggle {
+    width: 100%; padding: 14px 16px; display: flex; align-items: center; justify-content: space-between;
+    background: none; border: none; font-family: var(--font); font-size: 15px; font-weight: 600;
+    color: var(--text); cursor: pointer; -webkit-user-select: none; user-select: none;
+  }
+  .setup-guide-toggle .chevron { font-size: 13px; color: var(--text2); transition: transform .2s; }
+  .setup-guide-toggle .chevron.open { transform: rotate(180deg); }
+  .setup-guide-steps {
+    display: none; padding: 0 16px 16px;
+  }
+  .setup-guide-steps.open { display: block; }
+  .setup-guide-steps ol {
+    list-style: none; counter-reset: steps; padding: 0; margin: 0;
+  }
+  .setup-guide-steps li {
+    counter-increment: steps; position: relative; padding: 10px 0 10px 36px;
+    font-size: 14px; line-height: 1.5; color: var(--text); border-top: 1px solid var(--border2);
+  }
+  .setup-guide-steps li::before {
+    content: counter(steps); position: absolute; left: 0; top: 10px;
+    width: 24px; height: 24px; border-radius: 50%; background: var(--blue);
+    color: #fff; font-size: 13px; font-weight: 600;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .setup-guide-steps li strong { font-weight: 600; }
+  .setup-guide-steps .step-hint {
+    display: block; font-size: 12px; color: var(--text2); margin-top: 2px;
+  }
 </style>
 </head>
 <body>
@@ -212,6 +246,32 @@
     <div id="status-dot"></div>
     <div id="status-name">Ready to scan</div>
     <div id="status-sub">Tap here if scanning stops working</div>
+  </div>
+
+  <div class="setup-guide">
+    <button class="setup-guide-toggle" onclick="toggleGuide()">
+      Scanner Setup Guide <span id="guide-chevron" class="chevron">▼</span>
+    </button>
+    <div id="guide-steps" class="setup-guide-steps">
+      <ol>
+        <li>
+          <strong>Connect the scanner in Socket Mobile</strong>
+          <span class="step-hint">Open the Socket Mobile app and make sure your scanner is paired. If it won't connect, go to Settings > Bluetooth and check that the scanner appears there first.</span>
+        </li>
+        <li>
+          <strong>Switch to Socket Mobile Keyboard</strong>
+          <span class="step-hint">Tap the scan field, then press the globe icon on the keyboard and cycle until you see "Socket Mobile Keyboard." When correct, "Scanner Connected" will appear on the keyboard screen.</span>
+        </li>
+        <li>
+          <strong>Tap into the scan field before scanning</strong>
+          <span class="step-hint">The scanner only registers barcodes when the scan input is active. Always tap the scan area first.</span>
+        </li>
+        <li>
+          <strong>Scan and confirm</strong>
+          <span class="step-hint">A successful scan will flash the screen green and display the client's name. If nothing happens, repeat steps 1–3.</span>
+        </li>
+      </ol>
+    </div>
   </div>
 
   <div class="scan-wrap">
@@ -300,6 +360,14 @@ if ('serviceWorker' in navigator) {
 
 let customers = [];
 let checkins  = [];
+
+// ── Setup Guide toggle ──────────────────────────────────────────
+function toggleGuide() {
+  const steps = document.getElementById('guide-steps');
+  const chevron = document.getElementById('guide-chevron');
+  steps.classList.toggle('open');
+  chevron.classList.toggle('open');
+}
 
 // ── Boot ─────────────────────────────────────────────────────────
 function boot() {
