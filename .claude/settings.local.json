@@ -18,7 +18,10 @@
       "WebFetch(domain:raw.githubusercontent.com)",
       "WebFetch(domain:dev.to)",
       "WebFetch(domain:docs.sheetdb.io)",
-      "WebFetch(domain:sheet.best)"
+      "WebFetch(domain:sheet.best)",
+      "Bash(node -e ' *)",
+      "Bash(node *)",
+      "Bash(echo \"exit:$?\")"
     ]
   }
 }

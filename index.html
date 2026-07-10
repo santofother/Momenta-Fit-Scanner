@@ -213,16 +213,19 @@
   <div class="setup-card">
     <div class="icon">📋</div>
     <h1>Check-in Scanner</h1>
-    <p>Upload your customer CSV once. It'll be saved on this iPad so you never have to do this again.</p>
-    <input type="file" id="setup-file" accept=".csv,.xlsx,.xls" style="display:none" onchange="handleSetupLoad(event)">
-    <button class="btn btn-primary" style="width:100%;padding:11px;font-size:15px;"
-      onclick="document.getElementById('setup-file').click()">
-      Upload customer file
+    <p>Connect this iPad to your cloud customer list. The list stays private in your Google Sheet and updates automatically.</p>
+    <input type="password" id="setup-key" class="field" placeholder="Connection key"
+      autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" style="margin-bottom:8px;">
+    <button class="btn btn-primary" style="width:100%;padding:11px;font-size:15px;" onclick="connectRemote()">
+      Connect to cloud roster
     </button>
     <div id="setup-error"></div>
     <div class="setup-note">
-      <strong>Format:</strong> CSV or Excel with two columns — <strong>Name</strong> and <strong>Barcode</strong>. Header row is optional.<br><br>
-      Customer data is saved only on this iPad. Nothing is uploaded to the internet.
+      <strong>No connection key?</strong> Load a local file instead — this is the backup method.<br>
+      <input type="file" id="setup-file" accept=".csv,.xlsx,.xls" style="display:none" onchange="handleSetupLoad(event)">
+      <button class="btn" style="margin-top:8px;" onclick="document.getElementById('setup-file').click()">Upload customer file</button>
+      <br><br>
+      <strong>Format:</strong> CSV or Excel with two columns — <strong>Name</strong> and <strong>Barcode</strong>. Header row optional.
     </div>
   </div>
 </div>
@@ -313,7 +316,7 @@
     </div>
     <div class="table-wrap">
       <table>
-        <thead><tr><th>Name</th><th>Barcode / ID</th></tr></thead>
+        <thead><tr><th>Name</th><th>Barcode / ID</th><th></th></tr></thead>
         <tbody id="customers-tbody"></tbody>
       </table>
     </div>
@@ -322,10 +325,25 @@
   <!-- Settings -->
   <div id="panel-settings" class="panel">
     <div class="settings-section">
-      <div class="settings-title">Customer list</div>
-      <div class="settings-sub">Upload a new CSV to replace the current customer list. This will update the saved data on this iPad.</div>
+      <div class="settings-title">Cloud roster (primary)
+        <span id="roster-status" class="sync-status"><span id="roster-dot" class="sync-dot"></span><span id="roster-text">Roster: idle</span></span>
+      </div>
+      <div class="settings-sub">The customer list loads from your private Google Sheet and refreshes automatically. Enter the connection key for this iPad. The key is stored only on this device.</div>
+      <input type="password" id="conn-key-input" class="field" placeholder="Connection key"
+        autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" style="margin-bottom:8px;">
+      <div class="row">
+        <button class="btn btn-primary" onclick="saveConnKey()">Save key</button>
+        <button class="btn" onclick="syncRosterNow('roster-sync-result')">Sync now</button>
+        <button class="btn btn-danger" onclick="clearConnKey()">Remove key</button>
+      </div>
+      <div id="roster-sync-result" class="settings-meta"></div>
+    </div>
+
+    <div class="settings-section">
+      <div class="settings-title">Customer list (backup)</div>
+      <div class="settings-sub">Only used if you're not connected to the cloud roster. Upload a file to replace the list saved on this iPad.</div>
       <input type="file" id="replace-file" accept=".csv,.xlsx,.xls" style="display:none" onchange="handleReplaceLoad(event)">
-      <button class="btn btn-primary" onclick="document.getElementById('replace-file').click()">
+      <button class="btn" onclick="document.getElementById('replace-file').click()">
         Replace customer file
       </button>
       <div id="replace-result" class="settings-meta"></div>
@@ -371,15 +389,33 @@ function toggleGuide() {
 
 // ── Boot ─────────────────────────────────────────────────────────
 function boot() {
+  const key = getConnKey();
   try {
     const saved = localStorage.getItem('checkin_customers');
-    if (saved) {
-      customers = JSON.parse(saved);
-      if (customers.length > 0) { launchApp(); return; }
-    }
-  } catch(e) {}
-  // No saved data — show setup
+    if (saved) customers = JSON.parse(saved) || [];
+  } catch(e) { customers = []; }
+
+  if (customers.length > 0) {
+    // Have a cached list — launch instantly, then refresh from cloud in the background.
+    launchApp();
+    if (key) syncRosterNow();
+    return;
+  }
+  if (key) {
+    // Fresh device with a saved key but no cache — pull the roster, then launch.
+    syncRosterNow().then(() => {
+      if (customers.length > 0) launchApp();
+      else showSetup();
+    });
+    return;
+  }
+  showSetup();
+}
+
+function showSetup() {
   document.getElementById('setup').classList.remove('hidden');
+  const sk = document.getElementById('setup-key');
+  if (sk) sk.value = getConnKey();
 }
 
 function launchApp() {
@@ -387,6 +423,10 @@ function launchApp() {
   document.getElementById('app').classList.add('visible');
   checkins = [];
   renderAll();
+  const keyEl = document.getElementById('conn-key-input');
+  if (keyEl) keyEl.value = getConnKey();
+  if (getConnKey()) { setRosterStatus('ok', 'Roster: connected'); startRosterPolling(); }
+  else setRosterStatus('', 'Roster: not connected');
   setTimeout(() => { focusScan(); updateFocusState(); }, 400);
 }
 
@@ -495,11 +535,16 @@ function renderCustomers() {
   const list = customers.filter(c =>
     !q || c.name.toLowerCase().includes(q) || c.barcode.toLowerCase().includes(q));
   if (!list.length) {
-    tb.innerHTML = '<tr><td colspan="2" class="empty">No customers match.</td></tr>'; return;
+    tb.innerHTML = '<tr><td colspan="3" class="empty">No customers match.</td></tr>'; return;
   }
-  tb.innerHTML = list.map(c =>
-    `<tr><td class="fw">${esc(c.name)}</td><td class="mono">${esc(c.barcode)}</td></tr>`
-  ).join('');
+  const today = new Date().toLocaleDateString();
+  tb.innerHTML = list.map(c => {
+    const inToday = checkins.some(k => k.barcode === c.barcode && k.date === today);
+    const btn = inToday
+      ? `<button class="btn checkin-btn" data-barcode="${esc(c.barcode)}">✓ In — again</button>`
+      : `<button class="btn btn-primary checkin-btn" data-barcode="${esc(c.barcode)}">Check in</button>`;
+    return `<tr><td class="fw">${esc(c.name)}</td><td class="mono">${esc(c.barcode)}</td><td style="text-align:right">${btn}</td></tr>`;
+  }).join('');
 }
 
 function renderCheckins() {
@@ -524,6 +569,38 @@ function renderCheckins() {
 function esc(s) {
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
+
+// Manual check-in from the Customers tab — same result as a scan.
+function manualCheckin(barcode) {
+  const customer = customers.find(c => c.barcode === barcode);
+  if (!customer) return;
+  const now  = new Date();
+  const time = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  const date = now.toLocaleDateString();
+  checkins.push({ name: customer.name, barcode: customer.barcode, time, date });
+  syncToCloud({ name: customer.name, barcode: customer.barcode, time, date });
+  renderCheckins();
+  renderCustomers();
+  const dot = document.getElementById('status-dot');
+  const nameEl = document.getElementById('status-name');
+  const subEl = document.getElementById('status-sub');
+  if (dot && nameEl && subEl) {
+    dot.style.background = '#1a7a3a'; nameEl.style.color = '#1a7a3a';
+    nameEl.textContent = customer.name; subEl.textContent = 'Checked in at ' + time;
+    setTimeout(() => {
+      dot.style.background = '#d1d1d6'; nameEl.style.color = '#1c1c1e';
+      nameEl.textContent = 'Ready to scan';
+      subEl.textContent = 'Last: ' + customer.name + ' at ' + time;
+    }, 3000);
+  }
+}
+
+// Delegated handler so buttons work after every re-render.
+document.getElementById('customers-tbody').addEventListener('click', function(e) {
+  const btn = e.target.closest('.checkin-btn');
+  if (!btn) return;
+  manualCheckin(btn.getAttribute('data-barcode'));
+});
 
 // ── Tabs ──────────────────────────────────────────────────────────
 function switchTab(name) {
@@ -730,7 +807,8 @@ setInterval(() => {
 
 // ── Cloud sync to Google Sheets ──────────────────────────────────
 // Set this to your deployed Google Apps Script URL:
-const GOOGLE_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwnI2a9dUAlDd7lkeTIqufK2u93WE8iWlIpxLKEOyMcpUVw24dWxzexZEw2VnPhr3-L/exec';
+const GOOGLE_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbyhMmRmif_AfsoFezvVMpIXfggwJ7cU5PSu4FR1ge7JSlTjRCLCD7DPjgN5qsMEIpfkQQ/exec'
+;
 
 const syncDot  = document.getElementById('sync-dot');
 const syncText = document.getElementById('sync-text');
@@ -761,7 +839,7 @@ async function syncToCloud(checkin) {
   const isoDate = new Date().toISOString().slice(0, 7);
   const payload = encodeURIComponent(JSON.stringify({ date: isoDate, checkins: [checkin] }));
   try {
-    const url = GOOGLE_SCRIPT_URL + '?data=' + payload;
+    const url = GOOGLE_SCRIPT_URL + '?data=' + payload + '&key=' + encodeURIComponent(getConnKey());
     await sendToGoogle(url);
     setSyncStatus('ok', 'Synced');
     flushSyncQueue();
@@ -790,7 +868,7 @@ async function flushSyncQueue() {
     date: new Date().toISOString().slice(0, 7), checkins: queue
   }));
   try {
-    await sendToGoogle(GOOGLE_SCRIPT_URL + '?data=' + payload);
+    await sendToGoogle(GOOGLE_SCRIPT_URL + '?data=' + payload + '&key=' + encodeURIComponent(getConnKey()));
     localStorage.setItem('sync_queue', '[]');
     setSyncStatus('ok', 'Synced (' + queue.length + ' queued)');
   } catch (e) {
@@ -812,7 +890,7 @@ async function testSync() {
   try {
     const isoDate = now.toISOString().slice(0, 7);
     const payload = encodeURIComponent(JSON.stringify({ date: isoDate, checkins: [checkin] }));
-    await sendToGoogle(GOOGLE_SCRIPT_URL + '?data=' + payload);
+    await sendToGoogle(GOOGLE_SCRIPT_URL + '?data=' + payload + '&key=' + encodeURIComponent(getConnKey()));
     el.style.color = 'var(--green)';
     el.textContent = 'Sent! Check your Google Sheet for a TEST row in tab "' + isoDate + '"';
   } catch (err) {
@@ -824,6 +902,151 @@ async function testSync() {
 // Flush retry queue when coming back online or on app start
 window.addEventListener('online', flushSyncQueue);
 flushSyncQueue();
+
+// ── Remote roster (primary source of the customer list) ──────────
+// The connection key lives ONLY in this device's localStorage and is sent
+// with each request. The Google Sheet stays private; the Apps Script refuses
+// to return the roster without the correct key. Nothing sensitive is in the
+// public site source.
+const ROSTER_KEY_LS = 'roster_conn_key';
+const ROSTER_SIG_LS = 'roster_sig';
+let rosterPollTimer = null;
+
+function getConnKey() {
+  try { return localStorage.getItem(ROSTER_KEY_LS) || ''; } catch(e) { return ''; }
+}
+function setConnKey(k) {
+  try {
+    if (k) localStorage.setItem(ROSTER_KEY_LS, k);
+    else localStorage.removeItem(ROSTER_KEY_LS);
+  } catch(e) {}
+}
+
+function setRosterStatus(state, msg) {
+  const dot = document.getElementById('roster-dot');
+  const txt = document.getElementById('roster-text');
+  if (dot) dot.className = 'sync-dot ' + state;
+  if (txt) txt.textContent = msg;
+}
+
+async function fetchJson(action, key) {
+  const url = GOOGLE_SCRIPT_URL + '?action=' + action + '&key=' + encodeURIComponent(key);
+  const res = await fetch(url, { method: 'GET' });
+  const data = await res.json();
+  if (data.status === 'unauthorized') throw new Error('unauthorized');
+  if (data.status !== 'ok') throw new Error(data.message || 'error');
+  return data;
+}
+
+// Download and apply the roster. Throws on failure. Returns the customer count.
+async function pullRoster() {
+  const key = getConnKey();
+  if (!key) throw new Error('no-key');
+  const data = await fetchJson('roster', key);
+  const seen = new Set();
+  const clean = [];
+  (Array.isArray(data.customers) ? data.customers : []).forEach(c => {
+    const name = String(c.name || '').trim();
+    let barcode = String(c.barcode || '').trim().replace(/\.0$/, '');
+    if (!name || !barcode || seen.has(barcode)) return;
+    seen.add(barcode);
+    clean.push({ name, barcode });
+  });
+  customers = clean;
+  saveCustomers();
+  try { localStorage.setItem(ROSTER_SIG_LS, data.sig || ''); } catch(e) {}
+  return customers.length;
+}
+
+// Manual/one-shot sync. resultElId is an optional element to show a message in.
+async function syncRosterNow(resultElId) {
+  const res = resultElId ? document.getElementById(resultElId) : null;
+  const key = getConnKey();
+  if (!key) {
+    setRosterStatus('err', 'Roster: no key');
+    if (res) { res.style.color = 'var(--red)'; res.textContent = 'No connection key set.'; }
+    return false;
+  }
+  setRosterStatus('pending', 'Roster: syncing…');
+  if (res) { res.style.color = 'var(--text2)'; res.textContent = 'Syncing…'; }
+  try {
+    const n = await pullRoster();
+    renderAll();
+    setRosterStatus('ok', 'Roster: live (' + n + ')');
+    if (res) { res.style.color = 'var(--green)'; res.textContent = '✓ Loaded ' + n + ' customers from cloud.'; }
+    return true;
+  } catch (e) {
+    const msg = e.message === 'unauthorized' ? 'Wrong connection key.'
+              : e.message === 'no-key' ? 'No connection key set.'
+              : 'Could not reach cloud roster — using saved list.';
+    setRosterStatus('err', 'Roster: offline');
+    if (res) { res.style.color = 'var(--red)'; res.textContent = msg; }
+    return false;
+  }
+}
+
+// Cheap poll: check the roster fingerprint; only re-download when it changed.
+function startRosterPolling() {
+  if (rosterPollTimer) clearInterval(rosterPollTimer);
+  rosterPollTimer = setInterval(async () => {
+    const key = getConnKey();
+    if (!key) return;
+    try {
+      const data = await fetchJson('version', key);
+      let last = '';
+      try { last = localStorage.getItem(ROSTER_SIG_LS) || ''; } catch(e) {}
+      if (data.sig && data.sig !== last) {
+        await syncRosterNow();
+      } else {
+        setRosterStatus('ok', 'Roster: live (' + customers.length + ')');
+      }
+    } catch (e) {
+      setRosterStatus('err', 'Roster: offline');
+    }
+  }, 60000);
+}
+
+// Setup-screen "Connect to cloud roster"
+function connectRemote() {
+  const key = (document.getElementById('setup-key').value || '').trim();
+  const errEl = document.getElementById('setup-error');
+  if (!key) { errEl.style.color = 'var(--red)'; errEl.textContent = 'Enter a connection key.'; return; }
+  errEl.style.color = 'var(--text2)';
+  errEl.textContent = 'Connecting…';
+  setConnKey(key);
+  syncRosterNow().then(ok => {
+    if (ok && customers.length > 0) {
+      launchApp();
+    } else {
+      errEl.style.color = 'var(--red)';
+      errEl.textContent = ok ? 'Connected, but the roster is empty.' : 'Could not connect. Check the key and try again.';
+    }
+  });
+}
+
+// Settings-screen key management
+function saveConnKey() {
+  const v = (document.getElementById('conn-key-input').value || '').trim();
+  setConnKey(v);
+  if (!v) {
+    if (rosterPollTimer) clearInterval(rosterPollTimer);
+    setRosterStatus('err', 'Roster: no key');
+    const res = document.getElementById('roster-sync-result');
+    res.style.color = 'var(--red)'; res.textContent = 'Key cleared.';
+    return;
+  }
+  syncRosterNow('roster-sync-result').then(ok => { if (ok) startRosterPolling(); });
+}
+
+function clearConnKey() {
+  if (!confirm('Remove the connection key from this iPad? It will stop syncing until you enter it again.')) return;
+  setConnKey('');
+  document.getElementById('conn-key-input').value = '';
+  if (rosterPollTimer) clearInterval(rosterPollTimer);
+  setRosterStatus('', 'Roster: not connected');
+  const res = document.getElementById('roster-sync-result');
+  res.style.color = 'var(--text2)'; res.textContent = 'Connection key removed from this device.';
+}
 
 // ── Keyboard detection ───────────────────────────────────────────
 // Detect wrong keyboard by checking if the software keyboard is visible.
