@@ -818,16 +818,17 @@ function setSyncStatus(state, msg) {
   syncText.textContent = msg;
 }
 
-function sendToGoogle(url) {
-  // Use Image request — simplest cross-origin GET, always follows redirects
-  return new Promise((resolve) => {
-    const img = new Image();
-    img.onload = () => resolve('ok');
-    img.onerror = () => resolve('sent'); // server still processed it, just not an image
-    img.src = url;
-    // Fallback timeout
-    setTimeout(() => resolve('sent'), 8000);
-  });
+// Write check-ins via fetch so we can actually read the server's reply and
+// confirm the write (the old image request couldn't detect an auth failure).
+async function postCheckins(checkinArray) {
+  const isoDate = new Date().toISOString().slice(0, 7);
+  const payload = encodeURIComponent(JSON.stringify({ date: isoDate, checkins: checkinArray }));
+  const url = GOOGLE_SCRIPT_URL + '?data=' + payload + '&key=' + encodeURIComponent(getConnKey());
+  const res = await fetch(url, { method: 'GET' });
+  const data = await res.json();
+  if (data.status === 'unauthorized') throw new Error('unauthorized');
+  if (data.status !== 'ok') throw new Error(data.message || 'error');
+  return data.rows;
 }
 
 async function syncToCloud(checkin) {
@@ -835,17 +836,19 @@ async function syncToCloud(checkin) {
     setSyncStatus('err', 'Cloud: not configured');
     return;
   }
+  if (!getConnKey()) {
+    setSyncStatus('err', 'Cloud: no key');
+    queueForRetry(checkin);
+    return;
+  }
   setSyncStatus('pending', 'Syncing...');
-  const isoDate = new Date().toISOString().slice(0, 7);
-  const payload = encodeURIComponent(JSON.stringify({ date: isoDate, checkins: [checkin] }));
   try {
-    const url = GOOGLE_SCRIPT_URL + '?data=' + payload + '&key=' + encodeURIComponent(getConnKey());
-    await sendToGoogle(url);
+    await postCheckins([checkin]);
     setSyncStatus('ok', 'Synced');
     flushSyncQueue();
   } catch (err) {
     console.warn('Cloud sync failed:', err);
-    setSyncStatus('err', 'Offline — queued');
+    setSyncStatus('err', err.message === 'unauthorized' ? 'Cloud: wrong key' : 'Offline — queued');
     queueForRetry(checkin);
   }
 }
@@ -860,19 +863,17 @@ function queueForRetry(checkin) {
 
 async function flushSyncQueue() {
   if (!GOOGLE_SCRIPT_URL || GOOGLE_SCRIPT_URL.includes('PASTE_YOUR')) return;
+  if (!getConnKey()) return;
   let queue;
   try { queue = JSON.parse(localStorage.getItem('sync_queue') || '[]'); } catch(e) { return; }
   if (!queue.length) return;
   setSyncStatus('pending', 'Syncing ' + queue.length + ' queued...');
-  const payload = encodeURIComponent(JSON.stringify({
-    date: new Date().toISOString().slice(0, 7), checkins: queue
-  }));
   try {
-    await sendToGoogle(GOOGLE_SCRIPT_URL + '?data=' + payload + '&key=' + encodeURIComponent(getConnKey()));
+    await postCheckins(queue);
     localStorage.setItem('sync_queue', '[]');
     setSyncStatus('ok', 'Synced (' + queue.length + ' queued)');
   } catch (e) {
-    setSyncStatus('err', 'Queue flush failed');
+    setSyncStatus('err', e.message === 'unauthorized' ? 'Cloud: wrong key' : 'Queue flush failed');
   }
 }
 
@@ -888,14 +889,13 @@ async function testSync() {
     date: now.toLocaleDateString()
   };
   try {
+    await postCheckins([checkin]);
     const isoDate = now.toISOString().slice(0, 7);
-    const payload = encodeURIComponent(JSON.stringify({ date: isoDate, checkins: [checkin] }));
-    await sendToGoogle(GOOGLE_SCRIPT_URL + '?data=' + payload + '&key=' + encodeURIComponent(getConnKey()));
     el.style.color = 'var(--green)';
     el.textContent = 'Sent! Check your Google Sheet for a TEST row in tab "' + isoDate + '"';
   } catch (err) {
     el.style.color = 'var(--red)';
-    el.textContent = 'Failed: ' + err;
+    el.textContent = 'Failed: ' + (err.message === 'unauthorized' ? 'wrong connection key' : err.message);
   }
 }
 
