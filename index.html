@@ -367,13 +367,53 @@
       <div class="settings-sub">Remove the saved customer list from this iPad. You'll need to upload a new CSV file next time.</div>
       <button class="btn btn-danger" onclick="clearAllData()">Clear customer data</button>
     </div>
+
+    <div class="settings-section">
+      <div class="settings-title">App version</div>
+      <div class="settings-sub">If a device is behaving oddly, tap Force update to pull the latest version and reload.</div>
+      <button class="btn" onclick="forceUpdate()">Force update</button>
+      <div class="settings-meta">Build <span id="build-tag">…</span></div>
+    </div>
   </div>
 
 </div>
 
 <script>
+// Bump this every deploy. Shown in Settings so you can confirm what a device runs.
+const BUILD = 'v7';
+
+// Service worker: register, actively check for updates, and auto-reload when a
+// new version activates so devices never get stuck on stale code.
 if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('/sw.js').catch(() => {});
+  const hadController = !!navigator.serviceWorker.controller;
+  let refreshing = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    // Only reload for a genuine update, not the first-ever install.
+    if (refreshing || !hadController) return;
+    refreshing = true;
+    window.location.reload();
+  });
+  navigator.serviceWorker.register('/sw.js').then(reg => {
+    reg.update();
+    // Re-check for a new version periodically and whenever the app regains focus.
+    setInterval(() => reg.update(), 60000);
+    window.addEventListener('focus', () => reg.update());
+  }).catch(() => {});
+}
+
+// Manual escape hatch: clear caches, tell the SW to update, then hard reload.
+async function forceUpdate() {
+  try {
+    if ('caches' in window) {
+      const keys = await caches.keys();
+      await Promise.all(keys.map(k => caches.delete(k)));
+    }
+    if ('serviceWorker' in navigator) {
+      const regs = await navigator.serviceWorker.getRegistrations();
+      await Promise.all(regs.map(r => r.update()));
+    }
+  } catch (e) {}
+  location.reload();
 }
 
 let customers = [];
@@ -425,6 +465,8 @@ function launchApp() {
   renderAll();
   const keyEl = document.getElementById('conn-key-input');
   if (keyEl) keyEl.value = getConnKey();
+  const buildEl = document.getElementById('build-tag');
+  if (buildEl) buildEl.textContent = BUILD;
   if (getConnKey()) { setRosterStatus('ok', 'Roster: connected'); startRosterPolling(); }
   else setRosterStatus('', 'Roster: not connected');
   setTimeout(() => { focusScan(); updateFocusState(); }, 400);
@@ -534,6 +576,10 @@ function renderCustomers() {
   const tb = document.getElementById('customers-tbody');
   const list = customers.filter(c =>
     !q || c.name.toLowerCase().includes(q) || c.barcode.toLowerCase().includes(q));
+  // Sort by last name (last word of the name) ascending, then full name as tiebreaker.
+  list.sort((a, b) =>
+    lastName(a).localeCompare(lastName(b), undefined, { sensitivity: 'base' }) ||
+    a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
   if (!list.length) {
     tb.innerHTML = '<tr><td colspan="3" class="empty">No customers match.</td></tr>'; return;
   }
@@ -568,6 +614,12 @@ function renderCheckins() {
 
 function esc(s) {
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// Last name = last whitespace-separated word of the name (falls back to whole name).
+function lastName(c) {
+  const parts = String(c.name || '').trim().split(/\s+/);
+  return (parts[parts.length - 1] || '').toLowerCase();
 }
 
 // Manual check-in from the Customers tab — same result as a scan.

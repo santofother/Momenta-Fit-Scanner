@@ -1,4 +1,4 @@
-const CACHE = 'checkin-v5';
+const CACHE = 'checkin-v7';
 const ASSETS = ['/', '/index.html', '/manifest.json',
   'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js'];
 

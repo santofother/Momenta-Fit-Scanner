@@ -21,7 +21,10 @@
       "WebFetch(domain:sheet.best)",
       "Bash(node -e ' *)",
       "Bash(node *)",
-      "Bash(echo \"exit:$?\")"
+      "Bash(echo \"exit:$?\")",
+      "Bash(git ls-remote *)",
+      "Bash(curl -s -m 20 \"https://santofother.github.io/Momenta-Fit-Scanner/index.html\")",
+      "Bash(curl -s -m 20 \"https://santofother.github.io/Momenta-Fit-Scanner/sw.js\")"
     ]
   }
 }
