@@ -12,6 +12,12 @@ self.addEventListener('activate', e => {
   self.clients.claim();
 });
 self.addEventListener('fetch', e => {
+  const url = new URL(e.request.url);
+  // Never cache/intercept Google Apps Script calls — always hit the live network
+  // so roster reads and check-in writes are current.
+  if (url.hostname.endsWith('script.google.com') || url.hostname.endsWith('googleusercontent.com')) {
+    return;
+  }
   e.respondWith(
     fetch(e.request).then(r => {
       const clone = r.clone();

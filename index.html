@@ -169,6 +169,8 @@
     animation: pulse-hint 1.5s ease-in-out infinite;
   }
   .focus-hint.hidden { display: none; }
+  .hidden { display: none !important; }
+  #conn-key-input[readonly] { background: var(--bg2); color: var(--text2); }
   @keyframes pulse-hint { 0%,100% { opacity: 1; } 50% { opacity: .4; } }
 
   /* ── Scanner Setup Guide ── */
@@ -328,11 +330,13 @@
       <div class="settings-title">Cloud roster (primary)
         <span id="roster-status" class="sync-status"><span id="roster-dot" class="sync-dot"></span><span id="roster-text">Roster: idle</span></span>
       </div>
-      <div class="settings-sub">The customer list loads from your private Google Sheet and refreshes automatically. Enter the connection key for this iPad. The key is stored only on this device.</div>
-      <input type="password" id="conn-key-input" class="field" placeholder="Connection key"
+      <div class="settings-sub">The customer list loads from your private Google Sheet and refreshes automatically. The connection key is locked to prevent accidental changes — tap Change key to edit it. The key is stored only on this device.</div>
+      <input type="password" id="conn-key-input" class="field" placeholder="Connection key" readonly
         autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" style="margin-bottom:8px;">
       <div class="row">
-        <button class="btn btn-primary" onclick="saveConnKey()">Save key</button>
+        <button class="btn" id="change-key-btn" onclick="unlockConnKey()">Change key</button>
+        <button class="btn btn-primary hidden" id="save-key-btn" onclick="saveConnKey()">Save key</button>
+        <button class="btn hidden" id="cancel-key-btn" onclick="lockConnKey()">Cancel</button>
         <button class="btn" onclick="syncRosterNow('roster-sync-result')">Sync now</button>
         <button class="btn btn-danger" onclick="clearConnKey()">Remove key</button>
       </div>
@@ -982,8 +986,9 @@ function setRosterStatus(state, msg) {
 }
 
 async function fetchJson(action, key) {
-  const url = GOOGLE_SCRIPT_URL + '?action=' + action + '&key=' + encodeURIComponent(key);
-  const res = await fetch(url, { method: 'GET' });
+  // &_= cache-buster + no-store so we never get a stale roster/version from cache.
+  const url = GOOGLE_SCRIPT_URL + '?action=' + action + '&key=' + encodeURIComponent(key) + '&_=' + Date.now();
+  const res = await fetch(url, { method: 'GET', cache: 'no-store' });
   const data = await res.json();
   if (data.status === 'unauthorized') throw new Error('unauthorized');
   if (data.status !== 'ok') throw new Error(data.message || 'error');
@@ -1077,6 +1082,29 @@ function connectRemote() {
 }
 
 // Settings-screen key management
+// Key field stays locked (readonly) so it can't be edited by an accidental tap.
+function unlockConnKey() {
+  const input = document.getElementById('conn-key-input');
+  input.removeAttribute('readonly');
+  input.type = 'text'; // show while editing so the key can be verified
+  document.getElementById('change-key-btn').classList.add('hidden');
+  document.getElementById('save-key-btn').classList.remove('hidden');
+  document.getElementById('cancel-key-btn').classList.remove('hidden');
+  input.focus();
+  input.select();
+}
+
+function lockConnKey() {
+  const input = document.getElementById('conn-key-input');
+  input.value = getConnKey(); // discard any unsaved edits
+  input.setAttribute('readonly', '');
+  input.type = 'password';
+  document.getElementById('change-key-btn').classList.remove('hidden');
+  document.getElementById('save-key-btn').classList.add('hidden');
+  document.getElementById('cancel-key-btn').classList.add('hidden');
+  input.blur();
+}
+
 function saveConnKey() {
   const v = (document.getElementById('conn-key-input').value || '').trim();
   setConnKey(v);
@@ -1085,19 +1113,21 @@ function saveConnKey() {
     setRosterStatus('err', 'Roster: no key');
     const res = document.getElementById('roster-sync-result');
     res.style.color = 'var(--red)'; res.textContent = 'Key cleared.';
+    lockConnKey();
     return;
   }
   syncRosterNow('roster-sync-result').then(ok => { if (ok) startRosterPolling(); });
+  lockConnKey();
 }
 
 function clearConnKey() {
   if (!confirm('Remove the connection key from this iPad? It will stop syncing until you enter it again.')) return;
   setConnKey('');
-  document.getElementById('conn-key-input').value = '';
   if (rosterPollTimer) clearInterval(rosterPollTimer);
   setRosterStatus('', 'Roster: not connected');
   const res = document.getElementById('roster-sync-result');
   res.style.color = 'var(--text2)'; res.textContent = 'Connection key removed from this device.';
+  lockConnKey(); // resets the field to the (now empty) stored key
 }
 
 // ── Keyboard detection ───────────────────────────────────────────
